@@ -30,11 +30,19 @@
   .label{font-size:12px;color:var(--acc);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
   ul{margin:10px 0 0 18px;color:var(--muted)}
   .history-item{padding:10px 0;border-bottom:1px solid var(--line)}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}
+  .auth{display:grid;gap:10px}
+  .hidden{display:none !important}
   @media (max-width:900px){.hero,.grid,.split{grid-template-columns:1fr} h1{font-size:38px}}
 </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="topbar">
+      <div class="pill" id="userState">Non autenticato</div>
+      <button class="btn secondary hidden" id="logoutBtn">Logout</button>
+    </div>
+
     <div class="hero">
       <div class="card">
         <div class="pill">Prodotto reale</div>
@@ -49,7 +57,19 @@
           </div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="authCard">
+        <h2>Accedi o registrati</h2>
+        <div class="auth">
+          <input id="email" type="email" placeholder="Email" />
+          <input id="password" type="password" placeholder="Password" />
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn" id="loginBtn">Login</button>
+            <button class="btn secondary" id="registerBtn">Registrati</button>
+          </div>
+          <div class="small" id="authMsg">Serve un account per salvare la storia.</div>
+        </div>
+      </div>
+      <div class="card hidden" id="offerCard">
         <h2>Offerta</h2>
         <div class="price">199€ + 49€/mese</div>
         <div class="small">Setup + abbonamento</div>
@@ -62,13 +82,13 @@
       </div>
     </div>
 
-    <div class="grid">
+    <div class="grid hidden" id="mainGrid">
       <div class="card"><h3>Problema</h3><p>Le richieste si perdono tra chat, audio e email.</p></div>
       <div class="card"><h3>Soluzione</h3><p>Un unico spazio che trasforma caos in azioni.</p></div>
       <div class="card"><h3>Cliente</h3><p>Freelance, consulenti, agenti, piccole agenzie.</p></div>
     </div>
 
-    <div class="split">
+    <div class="split hidden" id="workArea">
       <div class="card">
         <h3>Input</h3>
         <p class="small">Incolla qui un testo di esempio o reale.</p>
@@ -82,11 +102,11 @@
       <div class="card outputs">
         <div><div class="label">Riassunto</div><div class="out" id="summary">Pronto.</div></div>
         <div><div class="label">Action item</div><div class="out" id="actions">Pronto.</div></div>
-        <div><div class="label">Follow-up email</div><div class="out" id="email">Pronto.</div></div>
+        <div><div class="label">Follow-up email</div><div class="out" id="emailOut">Pronto.</div></div>
       </div>
     </div>
 
-    <div class="split">
+    <div class="split hidden" id="historyArea">
       <div class="card">
         <h3>Storia recente</h3>
         <div id="history" class="small">Ancora vuota.</div>
@@ -102,10 +122,33 @@
 <script>
 const $ = (id)=>document.getElementById(id);
 const sample = `Ho parlato con Marco. Vuole il preventivo entro venerdì. Chiede integrazione con Telegram, una demo breve e conferma sul prezzo. Ha detto che se va bene decide entro la prossima settimana.`;
-const key = 'followup_brain_history';
+let lastResult = null;
+function showAuthed(email){
+  $('userState').textContent = `Autenticato come ${email}`;
+  $('logoutBtn').classList.remove('hidden');
+  $('authCard').classList.add('hidden');
+  $('offerCard').classList.remove('hidden');
+  $('mainGrid').classList.remove('hidden');
+  $('workArea').classList.remove('hidden');
+  $('historyArea').classList.remove('hidden');
+}
+function showGuest(){
+  $('userState').textContent = 'Non autenticato';
+  $('logoutBtn').classList.add('hidden');
+  $('authCard').classList.remove('hidden');
+  $('offerCard').classList.remove('hidden');
+  $('mainGrid').classList.remove('hidden');
+  $('workArea').classList.add('hidden');
+  $('historyArea').classList.add('hidden');
+}
 async function api(path, payload){
   const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   return r.json();
+}
+async function getMe(){
+  const r = await fetch('/api/me');
+  const d = await r.json();
+  if(d.user) showAuthed(d.user.email); else showGuest();
 }
 async function renderHistory(){
   const r = await fetch('/api/history');
@@ -114,33 +157,45 @@ async function renderHistory(){
   if(!items.length){ $('history').textContent = 'Ancora vuota.'; return; }
   $('history').innerHTML = items.slice().reverse().map(x => `<div class="history-item"><strong>${x.when}</strong><br>${escapeHtml(x.summary || '')}</div>`).join('');
 }
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-let lastResult = null;
+function escapeHtml(s){ return (s||'').replace(/[&<>"]|'/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m])); }
 async function analyze(text){
   const t = (text||'').trim();
-  if(!t){
-    $('summary').textContent = 'Incolla un testo per generare il riassunto.';
-    $('actions').textContent = '—';
-    $('email').textContent = '—';
-    return null;
-  }
+  if(!t){ $('summary').textContent = 'Incolla un testo per generare il riassunto.'; $('actions').textContent = '—'; $('emailOut').textContent = '—'; return null; }
   const data = await api('/api/analyze',{text:t});
   lastResult = {text:t, ...data};
   $('summary').textContent = data.summary || '';
   $('actions').textContent = (data.actions || []).map((x,i)=>`${i+1}. ${x}`).join('\n');
-  $('email').textContent = data.email || '';
+  $('emailOut').textContent = data.email || '';
   return lastResult;
 }
+$('loginBtn').onclick = async ()=>{
+  $('authMsg').textContent = 'Accesso in corso...';
+  const email = $('email').value.trim(); const password = $('password').value;
+  const d = await api('/api/login',{email,password});
+  if(d.error){ $('authMsg').textContent = d.error; return; }
+  $('authMsg').textContent = 'Accesso riuscito.';
+  await getMe(); await renderHistory();
+};
+$('registerBtn').onclick = async ()=>{
+  $('authMsg').textContent = 'Registrazione in corso...';
+  const email = $('email').value.trim(); const password = $('password').value;
+  const d = await api('/api/register',{email,password});
+  if(d.error){ $('authMsg').textContent = d.error; return; }
+  $('authMsg').textContent = 'Registrazione riuscita.';
+  await getMe(); await renderHistory();
+};
+$('logoutBtn').onclick = async ()=>{ await api('/api/logout',{}); await getMe(); };
 $('runBtn').onclick = ()=>analyze($('input').value);
 $('clearBtn').onclick = ()=>{ $('input').value=''; analyze(''); };
 $('demoBtn').onclick = ()=>{ $('input').value=sample; analyze(sample); };
 $('saveBtn').onclick = async ()=>{
   const result = lastResult || await analyze($('input').value);
   if(!result) return;
-  await api('/api/save',{text:result.text, summary:result.summary});
+  const r = await api('/api/save',{text:result.text, summary:result.summary});
+  if(r.error){ $('authMsg').textContent = 'Devi accedere per salvare la storia.'; return; }
   renderHistory();
 };
-analyze('');
+getMe();
 renderHistory();
 </script>
 </body>
