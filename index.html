@@ -29,8 +29,6 @@
   .out{background:#0a1022;border:1px solid var(--line);border-radius:14px;padding:14px;white-space:pre-wrap}
   .label{font-size:12px;color:var(--acc);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
   ul{margin:10px 0 0 18px;color:var(--muted)}
-  .table{width:100%;border-collapse:collapse}
-  .table td,.table th{border-bottom:1px solid var(--line);padding:8px 0;text-align:left;color:var(--muted)}
   .history-item{padding:10px 0;border-bottom:1px solid var(--line)}
   @media (max-width:900px){.hero,.grid,.split{grid-template-columns:1fr} h1{font-size:38px}}
 </style>
@@ -82,18 +80,9 @@
         </div>
       </div>
       <div class="card outputs">
-        <div>
-          <div class="label">Riassunto</div>
-          <div class="out" id="summary">Pronto.</div>
-        </div>
-        <div>
-          <div class="label">Action item</div>
-          <div class="out" id="actions">Pronto.</div>
-        </div>
-        <div>
-          <div class="label">Follow-up email</div>
-          <div class="out" id="email">Pronto.</div>
-        </div>
+        <div><div class="label">Riassunto</div><div class="out" id="summary">Pronto.</div></div>
+        <div><div class="label">Action item</div><div class="out" id="actions">Pronto.</div></div>
+        <div><div class="label">Follow-up email</div><div class="out" id="email">Pronto.</div></div>
       </div>
     </div>
 
@@ -110,44 +99,45 @@
       </div>
     </div>
   </div>
-
 <script>
 const $ = (id)=>document.getElementById(id);
 const sample = `Ho parlato con Marco. Vuole il preventivo entro venerdì. Chiede integrazione con Telegram, una demo breve e conferma sul prezzo. Ha detto che se va bene decide entro la prossima settimana.`;
 const key = 'followup_brain_history';
-function renderHistory(){
-  const items = JSON.parse(localStorage.getItem(key) || '[]');
-  if(!items.length){ $('history').textContent = 'Ancora vuota.'; return; }
-  $('history').innerHTML = items.slice().reverse().map(x => `<div class="history-item"><strong>${x.when}</strong><br>${escapeHtml(x.summary)}</div>`).join('');
+async function api(path, payload){
+  const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  return r.json();
 }
-function escapeHtml(s){ return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function analyze(text){
+async function renderHistory(){
+  const r = await fetch('/api/history');
+  const data = await r.json();
+  const items = data.items || [];
+  if(!items.length){ $('history').textContent = 'Ancora vuota.'; return; }
+  $('history').innerHTML = items.slice().reverse().map(x => `<div class="history-item"><strong>${x.when}</strong><br>${escapeHtml(x.summary || '')}</div>`).join('');
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+let lastResult = null;
+async function analyze(text){
   const t = (text||'').trim();
   if(!t){
     $('summary').textContent = 'Incolla un testo per generare il riassunto.';
     $('actions').textContent = '—';
     $('email').textContent = '—';
-    return '';
+    return null;
   }
-  const summary = t.length > 260 ? t.slice(0,260).replace(/\s+\S*$/, '') + '…' : t;
-  $('summary').textContent = summary;
-  $('actions').textContent = [
-    '1. Invia il preventivo entro venerdì.',
-    '2. Prepara una demo breve con Telegram.',
-    '3. Conferma prezzo e prossima decisione.'
-  ].join('\n');
-  $('email').textContent = `Ciao Marco,\n\nti confermo che preparo il preventivo e la demo breve come richiesto.\nTi mando tutto entro venerdì, così puoi valutare con calma e decidere la prossima settimana.\n\nA presto`;
-  return summary;
+  const data = await api('/api/analyze',{text:t});
+  lastResult = {text:t, ...data};
+  $('summary').textContent = data.summary || '';
+  $('actions').textContent = (data.actions || []).map((x,i)=>`${i+1}. ${x}`).join('\n');
+  $('email').textContent = data.email || '';
+  return lastResult;
 }
 $('runBtn').onclick = ()=>analyze($('input').value);
 $('clearBtn').onclick = ()=>{ $('input').value=''; analyze(''); };
 $('demoBtn').onclick = ()=>{ $('input').value=sample; analyze(sample); };
-$('saveBtn').onclick = ()=>{
-  const summary = analyze($('input').value);
-  if(!summary) return;
-  const items = JSON.parse(localStorage.getItem(key) || '[]');
-  items.push({when:new Date().toLocaleString('it-IT'), summary});
-  localStorage.setItem(key, JSON.stringify(items.slice(-20)));
+$('saveBtn').onclick = async ()=>{
+  const result = lastResult || await analyze($('input').value);
+  if(!result) return;
+  await api('/api/save',{text:result.text, summary:result.summary});
   renderHistory();
 };
 analyze('');
